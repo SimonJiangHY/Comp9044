@@ -1,0 +1,585 @@
+#! /usr/bin/env python3
+
+from sys import exit,argv,stdin
+import re
+import fileinput
+import os 
+
+
+##################
+# functions
+##################
+def clean_commad(dirty_data):
+    for i in range(len(dirty_data)):
+        command = dirty_data[i]
+        if len(command) > 0:
+            if command[0] == "#":
+                dirty_data[i] = ""
+                continue
+        flag = -1 
+        for j in range(len(command)):
+            if command[j] == "#":
+                flag = j
+        if flag > 0 :
+            command = command[:flag]
+        
+        command = command.strip()
+        if re.fullmatch(r".+[qdp]$",command):
+            last = command[-1]
+            address = command[:-1].strip()
+            if re.search(r",",address):
+                start_end=address.split(",")
+                if len(start_end)!= 2:
+                    print(f"{argv[0]}: error")
+                    exit(1)
+                else:
+                    start = start_end[0].strip()
+                    end = start_end[1].strip()
+                    command = start+","+end+last
+            else:
+                command = address+last
+        if re.search(r"s.+",command):
+            sub_command = re.search(r"s.+",command).group(0)
+            cur_delimiter = sub_command[1]
+            regex = f".*s{cur_delimiter}.*{cur_delimiter}.*{cur_delimiter}g?"
+            if re.fullmatch(regex,command): 
+                address_len = len(command)-len(sub_command)
+                if address_len > 0:
+                    address = command[:address_len].strip()
+                    if re.search(r",",address):
+                        start_end=address.split(",")
+                        if len(start_end)!= 2:
+                            print(f"{argv[0]}: error")
+                            exit(1)
+                        else:
+                            start = start_end[0].strip()
+                            end = start_end[1].strip()
+                            command = start+","+end+sub_command
+                    else:
+                        command =address+sub_command
+        if re.search(r"[aic] .+",command):
+            sub_command = re.search(r"[aic] .+",command).group(0)
+            address_len = len(command) - len(sub_command)
+            if address_len > 0 :
+                address = command[:address_len].strip()
+                if re.search(r",",address):
+                    start_end=address.split(",")
+                    if len(start_end)!= 2:
+                        print(f"{argv[0]}: error")
+                        exit(1)
+                    else:
+                        start = start_end[0].strip()
+                        end = start_end[1].strip()
+                        command = start+","+end+sub_command
+                else:
+                    command =address+sub_command
+    
+
+        dirty_data[i] = command
+    return dirty_data
+
+
+def get_start_end(command):
+    if re.search(r",",command):
+        command_range = command.split(",")
+        if len(command_range) != 2:
+            print(f"{argv[0]}: error")
+            exit(1)
+        start = command_range[0]
+        end = command_range[1]
+    else :
+        start = end = command
+
+    return start,end
+
+
+def q_command(command,content,line_number,status,if_last):
+    address = command[:-1]
+    # [number]q
+    if re.fullmatch(r"[0-9]+",address):
+        if line_number == int(address):
+            status = 1
+    # /regex/q 
+    elif re.fullmatch(r"\/.+\/",address):
+        sub = address[1:-1]
+        if re.search(sub,content):
+            status = 1
+    elif address == "$":
+        if if_last == 1:
+            status = 1
+    else:
+        print(f"{argv[0]}: error")
+        exit(1)    
+    return status
+
+
+def p_command(command,content,line_number,status,if_in_range,if_last):
+    status = 0
+    address = command[:-1]
+    if address == "":
+        status = 1 
+    elif address == "$":
+        if if_last == 1:
+            status = 1
+    else:
+        start,end = get_start_end(address)
+        # single target
+        if start == end:
+            if re.fullmatch(r"[0-9]+",start):
+                if line_number == int(start):
+                    status = 1
+            elif re.fullmatch(r"\/.+\/",start):
+                sub = start[1:-1]
+                if re.search(sub,content):
+                    status = 1
+            else:
+                print(f"{argv[0]}: error")
+                exit(1)
+        # range target
+        else:
+            # finding start
+            if if_in_range == 0:
+                if re.fullmatch(r"[0-9]+",start):
+                    if line_number == int(start):
+                        status = 1
+                        if_in_range = 1
+                elif re.fullmatch(r"\/.+\/",start):
+                    sub = start[1:-1]
+                    if re.search(sub,content):
+                        status = 1
+                        if_in_range = 1
+                else:
+                    print(f"{argv[0]}: error")
+                    exit(1) 
+
+                if re.fullmatch(r"[0-9]+",end):
+                    if line_number > int(end):
+                        if_in_range = 0     
+            # finding end              
+            else:
+                status = 1
+                if re.fullmatch(r"[0-9]+",end):
+                    if line_number == int(end):
+                        if_in_range = 0
+                elif re.fullmatch(r"\/.+\/",end):
+                    sub = end[1:-1]
+                    if re.search(sub,content):
+                        if_in_range = 0
+                else:
+                    print(f"{argv[0]}: error")
+                    exit(1)
+
+
+    return status,if_in_range
+
+def d_command(command,content,line_number,status,if_in_range,if_last):
+    address = command[:-1]
+    if address == "":
+        status = 1 
+    elif address == "$":
+        if if_last == 1:
+            status = 1
+    else:
+        start,end = get_start_end(address)
+        if start == end:
+            if re.fullmatch(r"[0-9]+",start):
+                if line_number == int(start):
+                    status = 1
+            elif re.fullmatch(r"\/.+\/",start):
+                sub = start[1:-1]
+                if re.search(sub,content):
+                    status = 1
+            else:
+                print(f"{argv[0]}: error")
+                exit(1)
+        # range target
+        else:
+            # finding start
+            if if_in_range == 0:
+                if re.fullmatch(r"[0-9]+",start):
+                    if line_number == int(start):
+                        status = 1
+                        if_in_range = 1
+                elif re.fullmatch(r"\/.+\/",start):
+                    sub = start[1:-1]
+                    if re.search(sub,content):
+                        status = 1
+                        if_in_range = 1
+                else:
+                    print(f"{argv[0]}: error")
+                    exit(1)  
+                if re.fullmatch(r"[0-9]+",end):
+                    if line_number > int(end):
+                        if_in_range = 0     
+            # finding end              
+            else:
+                status = 1
+                if re.fullmatch(r"[0-9]+",end):
+                    if line_number == int(end):
+                        if_in_range = 0
+                elif re.fullmatch(r"\/.+\/",end):
+                    sub = end[1:-1]
+                    if re.search(sub,content):
+                        if_in_range = 0
+                else:
+                    print(f"{argv[0]}: error")
+                    exit(1) 
+
+    return status,if_in_range
+
+def make_substitue(line,reg,sub,g):
+    targets = re.findall(reg,line)
+    for target in targets:
+        line = line.replace(target,sub,1)
+        if g == 0:
+            break
+    return line
+
+def s_command(address,command,delimiter,content,line_number,if_in_range,if_last):
+    if_g = 0 if command[-1] == delimiter else 1
+    regex = command.split(delimiter)[1]
+    substitution  = command.split(delimiter)[2]
+
+    if address == "":
+        content = make_substitue(content,regex,substitution,if_g)
+    elif address == "$":
+        if if_last == 1:
+            content = make_substitue(content,regex,substitution,if_g)
+    else:
+        start,end = get_start_end(address)
+        if start == end:
+            if re.fullmatch(r"[0-9]+",start):
+                if line_number == int(start):
+                    content = make_substitue(content,regex,substitution,if_g)
+            elif re.fullmatch(r"\/.+\/",start):
+                sub = start[1:-1]
+                if re.search(sub,content):
+                     content = make_substitue(content,regex,substitution,if_g)
+            else:
+                    print(f"{argv[0]}: error")
+                    exit(1) 
+        else:
+            # finding start
+            if if_in_range == 0:
+                if re.fullmatch(r"[0-9]+",start):
+                    if line_number == int(start):
+                        content = make_substitue(content,regex,substitution,if_g)
+                        if_in_range = 1
+                elif re.fullmatch(r"\/.+\/",start):
+                    sub = start[1:-1]
+                    if re.search(sub,content):
+                        content = make_substitue(content,regex,substitution,if_g)
+                        if_in_range = 1
+                else:
+                    print(f"{argv[0]}: error")
+                    exit(1) 
+                if re.fullmatch(r"[0-9]+",end):
+                    if line_number > int(end):
+                        if_in_range = 0 
+            else:
+                if re.fullmatch(r"[0-9]+",end):
+                    if line_number == int(end):
+                        if_in_range = 0
+                elif re.fullmatch(r"\/.+\/",end):
+                    sub = end[1:-1]
+                    if re.search(sub,content):
+                        if_in_range = 0
+                else:
+                    print(f"{argv[0]}: error")
+                    exit(1)  
+                content = make_substitue(content,regex,substitution,if_g)
+
+    return content,if_in_range
+
+def a_i_command(address,content,line_number,status,if_in_range,if_last):
+    if address == "":
+        status = 1
+    elif address == "$":
+        if if_last == 1:
+            status = 1
+    else:
+        start,end = get_start_end(address)
+        if start == end:
+            if re.fullmatch(r"[0-9]+",start):
+                if line_number == int(start):
+                    status = 1
+            elif re.fullmatch(r"\/.+\/",start):
+                sub = start[1:-1]
+                if re.search(sub,content):
+                    status = 1
+            else:
+                print(f"{argv[0]}: error")
+                exit(1)
+        # range target
+        else:
+            # finding start
+            if if_in_range == 0:
+                if re.fullmatch(r"[0-9]+",start):
+                    if line_number == int(start):
+                        status = 1
+                        if_in_range = 1
+                elif re.fullmatch(r"\/.+\/",start):
+                    sub = start[1:-1]
+                    if re.search(sub,content):
+                        status = 1
+                        if_in_range = 1
+                else:
+                    print(f"{argv[0]}: error")
+                    exit(1)  
+                if re.fullmatch(r"[0-9]+",end):
+                    if line_number > int(end):
+                        if_in_range = 0     
+            # finding end              
+            else:
+                status = 1
+                if re.fullmatch(r"[0-9]+",end):
+                    if line_number == int(end):
+                        if_in_range = 0
+                elif re.fullmatch(r"\/.+\/",end):
+                    sub = end[1:-1]
+                    if re.search(sub,content):
+                        if_in_range = 0
+                else:
+                    print(f"{argv[0]}: error")
+                    exit(1) 
+
+    return status,if_in_range
+
+
+def c_command(address,command,content,line_number,if_in_range,if_last):
+    change = command[2:]
+    if address == "":
+        content = change
+    elif address =="$":
+        if if_last == 1:
+            content = change
+    else:
+        start,end = get_start_end(address)
+        if start == end:
+            if re.fullmatch(r"[0-9]+",start):
+                if line_number == int(start):
+                    content = change
+            elif re.fullmatch(r"\/.+\/",start):
+                sub = start[1:-1]
+                if re.search(sub,content):
+                     content = change
+            else:
+                    print(f"{argv[0]}: error")
+                    exit(1) 
+        else:
+            # finding start
+            if if_in_range == 0:
+                if re.fullmatch(r"[0-9]+",start):
+                    if line_number == int(start):
+                        content = change
+                        if_in_range = 1
+                elif re.fullmatch(r"\/.+\/",start):
+                    sub = start[1:-1]
+                    if re.search(sub,content):
+                        content = change
+                        if_in_range = 1
+                else:
+                    print(f"{argv[0]}: error")
+                    exit(1) 
+                if re.fullmatch(r"[0-9]+",end):
+                    if line_number > int(end):
+                        if_in_range = 0 
+            else:
+                if re.fullmatch(r"[0-9]+",end):
+                    if line_number == int(end):
+                        if_in_range = 0
+                elif re.fullmatch(r"\/.+\/",end):
+                    sub = end[1:-1]
+                    if re.search(sub,content):
+                        if_in_range = 0
+                else:
+                    print(f"{argv[0]}: error")
+                    exit(1)  
+                content = change
+    
+    return content,if_in_range
+
+def main_silppy(command_lst,line,line_number,status,if_last):
+    if_quit = 0
+    if_print = 0
+    if_delete = 0 
+    if_append = 0
+    if_insert = 0
+    p_line = []
+    a_line = ""
+    i_line = ""
+    for i in range(len(command_lst)):
+        current_command = command_lst[i]
+        # check command
+        if re.fullmatch(r".+q$",current_command):
+            if_quit = q_command(current_command,line,line_number,if_quit,if_last)
+        elif re.fullmatch(r".*p$",current_command):
+            if if_delete == 0:
+                if_print,status[i] = p_command(current_command,line,line_number,if_print,status[i],if_last)
+                if if_print == 1:
+                    p_line.append(line)
+        elif re.fullmatch(r".*d$",current_command):
+            if_delete,status[i] = d_command(current_command,line,line_number,if_delete,status[i],if_last)
+        if re.search(r"s.+",current_command):
+            sub_command = re.search(r"s.+",current_command).group(0)
+            cur_delimiter = sub_command[1]
+            regex = f".*s{cur_delimiter}.*{cur_delimiter}.*{cur_delimiter}g?"
+            if re.fullmatch(regex,current_command):
+                address_len = len(current_command)-len(sub_command)
+                cur_address = current_command[:address_len]
+                line,status[i] = s_command(cur_address,sub_command,cur_delimiter,line,line_number,status[i],if_last)
+        if re.search(r"[aic] .+",current_command):
+            sub_command = re.search(r"[aic] .+",current_command).group(0)
+            address_len = len(current_command) - len(sub_command)
+            cur_address = current_command[:address_len]
+            if sub_command[0] == "a":
+                if_append,status[i] = a_i_command(cur_address,line,line_number,if_append,status[i],if_last)
+                if if_append == 1:
+                    a_line = sub_command[2:]
+            elif sub_command[0] == "i":
+                if_insert,status[i] = a_i_command(cur_address,line,line_number,if_append,status[i],if_last)
+                if if_insert == 1:
+                    i_line = sub_command[2:]
+            elif sub_command[0] == "c":
+                line,status[i] = c_command(cur_address,sub_command,line,line_number,status[i],if_last)
+                
+        # if quit command then we do not need to do the following command
+        if if_quit == 1 and if_delete == 0:
+            break
+    if len(p_line) != 0:
+        if_print = 1
+    return if_quit,if_print,if_delete,if_append,if_insert,line,p_line,a_line,i_line,status
+
+
+################
+# main procedure
+################
+if_n = 0
+if_f = 0
+if_i = 0 
+option_num = 0 
+argv_len = len(argv)
+
+for i in range(1,len(argv)):
+    if argv[i] == "-i":
+        if_i = 1
+        option_num += 1
+    if argv[i] == "-n":
+        if_n = 1
+        option_num += 1 
+    if argv[i] == "-f":
+        if_f = 1
+        command_file_flag = i + 1
+        option_num += 1 
+
+
+
+commands = []
+if if_f == 0:
+    slippy_command = argv[option_num + 1]
+    divide_line = slippy_command.split("\n")
+    for i in divide_line:
+        divide_semicolon = i.split(";")
+        for j in divide_semicolon:
+            commands.append(j)
+else:
+    command_file = argv[command_file_flag]
+    if not os.path.exists(command_file):
+        print(f"{argv[0]}: error")
+        exit(1)
+    with open(command_file,"r") as input_file:
+        for line in input_file:
+            divide_line = line[:-1]
+            divide_semicolon = divide_line.split(";")
+            for j in divide_semicolon:
+                commands.append(j)
+
+commands =clean_commad(commands)
+
+# reading lines
+status_lst = [0 for i in range(len(commands))] # record if in the [start,end] range
+# # read line from stdin
+if argv_len  == option_num + 2: 
+    cur = 1    # record line number
+    cur_line = input()
+    check_last_line = 0
+    while True :
+        try:
+            next_line = input()
+        except:
+            check_last_line = 1 
+        # main function 
+        check_quit,check_print,check_delete,check_append,check_insert,cur_line,print_line,append_line,insert_line,status_lst = main_silppy(commands,cur_line,cur,status_lst,check_last_line)
+        # print result
+        if check_print == 1:
+            for p_line in print_line:
+                print(p_line)
+        if check_insert == 1:
+            print(insert_line)
+        if if_n == 0:
+            if check_delete == 0:
+                print(cur_line)
+        if check_append ==1:
+            print(append_line)
+        # if quit command then we do not need to read the next line
+        if check_quit == 1 and check_delete == 0:
+                break
+        
+        if check_last_line == 0:
+            cur_line = next_line
+            cur += 1
+
+        if check_last_line == 1:
+            break
+# read line from file
+else:
+    result = []
+    file_lst =[]
+    for i in range(option_num+2,argv_len):
+        file_lst.append(argv[i])
+    
+    with fileinput.input(files=file_lst) as file:
+        cur = 1
+        cur_line = file.readline()[:-1]
+        check_last_line = 0
+        while True :
+            next_line = file.readline()[:-1]
+            if next_line == "":
+                check_last_line = 1 
+            # main function 
+            check_quit,check_print,check_delete,check_append,check_insert,cur_line,print_line,append_line,insert_line,status_lst = main_silppy(commands,cur_line,cur,status_lst,check_last_line)
+            # print result
+            if check_print == 1:
+                for p_line in print_line:
+                    result.append(p_line)
+            if check_insert == 1:
+                result.append(insert_line)
+            if if_n == 0:
+                if check_delete == 0:
+                    result.append(cur_line)
+            if check_append ==1:
+                result.append(append_line)
+            # if quit command then we do not need to read the next line
+            if check_quit == 1 and check_delete == 0:
+                    break   
+        
+            if check_last_line == 0:
+                cur_line = next_line
+                cur += 1
+
+            if check_last_line == 1:
+                break
+    if if_i == 0:
+        for line in result:
+            print(line)
+    else:
+        with open(file_lst[0],"w") as wirte:
+            for i in range(len(result)):
+                line = result[i]
+                result[i] = line + "\n"
+            wirte.writelines(result)  
+    
+    for file in file_lst:
+        if not os.path.exists(file):
+            print(f"{argv[0]}: error")
+            exit(1)
