@@ -1,0 +1,128 @@
+#!/bin/dash
+
+repo=.tigger
+if test ! -d "$repo"
+then 
+    echo "$0: error: tigger repository directory $repo not found" >&2
+    exit 1
+fi 
+
+if test ! "$#" -eq 1
+then
+    echo "Usage: $0 <branch>" >&2
+    exit 1
+fi
+
+target_branch=$1
+current_branch=$(cat "$repo"/.current_branch)
+# for local
+# ./tigger-status > /dev/null 2>&1
+# for autotest
+tigger-status  > /dev/null 2>&1
+
+if test ! -d $repo/branch/"$target_branch"
+then
+    echo "$0: error: unknown branch '$target_branch'" >&2
+    exit 1
+fi
+
+if test "$target_branch" = "$current_branch"
+then
+    echo "No need to switch"
+    exit 0
+fi
+
+# case: two branches have the same file -> same commit number
+current_commit=$(cat $repo/branch/"$current_branch"/.log | cut -d' ' -f1 | tail -1)
+target_commit=$(cat $repo/branch/"$target_branch"/.log | cut -d' ' -f1 | tail -1)
+
+if test "$current_commit" = "$target_commit"
+then
+    echo "$target_branch" > "$repo/.current_branch"
+    echo "Switched to branch '$target_branch'" 
+    exit 0
+fi 
+
+check_overwritten=false
+
+touch .tmp_record
+
+for file in *
+do
+    if test "$file" = "*"
+    then
+        break
+    fi
+    if test -e "$repo"/branch/"$current_branch"/"$current_commit"/"$file"
+    then
+        if diff "$file" $repo/branch/"$current_branch"/"$current_commit"/"$file" > /dev/null 2>&1 
+        then
+            continue
+        else
+            if diff "$file" $repo/branch/"$target_branch"/"$target_commit"/"$file" > /dev/null 2>&1
+            then
+                continue
+            else
+                check_overwritten=true
+                echo "$file" >> .tmp_record
+            fi 
+        fi
+    else
+        if test -e "$repo"/branch/"$target_branch"/"$target_commit"/"$file"
+        then
+            check_overwritten=true
+            echo "$file" >> .tmp_record
+        fi
+    fi
+done
+
+
+if test "$check_overwritten" = "false"
+then
+    if test "$current_commit" = "$target_commit"
+    then
+        echo "$target_branch" > "$repo/.current_branch"
+        echo "Switched to branch '$target_branch'"
+        rm .tmp_record
+        exit 0
+    else
+        # remove file in index
+        for file in "$repo"/index/*
+        do
+            if test ! "$file" = "*"
+            then
+                rm "$file"
+            fi
+        done
+        # remove file in work directory
+        for file in *
+        do
+            if test ! "$file" = "*"
+            then
+                file_status=$(cat $repo/.status | grep -Ev ^tigger- |grep -E ^"$file" - | cut -d'-' -f2 | sed -E -e 's/^[ ]//g')
+                if test "$file_status" = "same as repo"
+                then
+                    rm "$file"
+                fi
+            fi
+        done
+        # copy file from target branch
+        for file in "$repo"/branch/"$target_branch"/"$target_commit"/*
+        do
+            if test ! "$file" = "*"
+            then
+                cp "$file" ./
+                cp "$file" $repo/index/
+                echo "$target_branch" > $repo/.current_branch
+            fi
+        done
+        echo "Switched to branch '$target_branch'"
+        rm .tmp_record
+        exit 0
+    fi
+else
+    echo "$0: error: Your changes to the following files would be overwritten by checkout:"
+    cat .tmp_record | sort
+    rm .tmp_record
+    exit 1
+fi

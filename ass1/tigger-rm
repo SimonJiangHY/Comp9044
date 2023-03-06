@@ -1,0 +1,115 @@
+#!/bin/dash
+
+repo=.tigger
+if test ! -d "$repo"
+then 
+    echo "$0: error: tigger repository directory $repo not found" >&2
+    exit 1
+fi 
+
+# run status to ensure the status are fresh
+# for local
+# ./tigger-status > /dev/null 2>&1
+# for autotest
+tigger-status  > /dev/null 2>&1
+
+
+check_force=false
+check_cached=false
+
+for args in "$@"
+do
+    if test "$args" = "--force"
+    then
+        check_force=true
+    fi
+    if test "$args" = "--cached"
+    then
+        check_cached=true
+    fi
+done
+
+for file in "$@"
+do
+    if test "$file" != "--force" -a "$file" != "--cached"
+    then
+        if ! test -e "$repo"/index/"$file"
+        then
+            # case : file not exists and file untracked
+            echo "$0: error: '$file' is not in the tigger repository" >&2
+            exit 1    
+        fi    
+    fi
+done    
+
+for file in "$@"
+do
+    if test "$file" != "--force" -a "$file" != "--cached"
+    then
+        # check if file exists in index
+        if test -e "$repo"/index/"$file"
+        then
+            # force option -> delete directly with out checking status
+            if test "$check_force" = "true"
+            then
+                if test "$check_cached" = "false"
+                then
+                    rm "$file" "$repo"/index/"$file"
+                else
+                    rm "$repo"/index/"$file"
+                fi
+            # no force option -> check status to ensure not losing work
+            else
+                file_status=$(cat $repo/.status | grep -E ^"$file" - | cut -d'-' -f2 | sed -E -e 's/^[ ]//g')
+                # echo "$file_status"
+                # case : work != index = repo
+                if test "$file_status" = "file changed, changes not staged for commit"
+                then
+                    if test "$check_cached" = "false"
+                    then
+                        echo "$0: error: '$file' in the repository is different to the working file" >&2
+                        exit 1
+                    else
+                        rm "$repo"/index/"$file"
+                    fi
+                fi
+                # case : work != index != repo
+                if test "$file_status" = "file changed, different changes staged for commit" -o "$file_status" = "added to index, file changed"
+                then 
+                    echo "$0: error: '$file' in index is different to both the working file and the repository" >&2
+                    exit 1
+                fi
+                # case : work = index != repo
+                if test "$file_status" = "added to index" -o "$file_status" = "file changed, changes staged for commit"
+                then
+                    if test "$check_cached" = "false"
+                    then
+                        echo "$0: error: '$file' has staged changes in the index" >&2
+                        exit 1
+                    else
+                        rm "$repo"/index/"$file"
+                    fi
+                fi
+
+                # this case only occurs when you rm file directly
+                if test "$file_status" = "file deleted" -o "$file_status" = "added to index, file deleted"
+                then
+                    rm "$repo"/index/"$file"
+                fi
+
+                if test "$file_status" = "same as repo"
+                then                   
+                    if test "$check_cached" = "false"
+                    then
+                        rm "$file" "$repo"/index/"$file"
+                    else
+                        rm "$repo"/index/"$file"
+                    fi
+                fi
+            fi            
+        fi
+    fi
+done
+
+
+

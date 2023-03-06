@@ -1,0 +1,36 @@
+#!/bin/dash
+
+# check argument number
+if test $# -eq 0
+then 
+    echo "Usage: $0 <file name> <file name> ..."
+    exit 1
+fi
+
+# check if repo exists
+repo=.tigger
+if test ! -d "$repo"
+then 
+    echo "$0: error: tigger repository directory $repo not found" >&2
+    exit 1
+fi
+
+for file in "$@"
+do
+    if test ! -e "$file"
+    then
+        if test ! -e "$repo/index/$file"
+        then
+            echo "$0: error: can not open '$file'"
+        else
+            rm "$repo/index/$file"
+        fi
+    else
+
+        if test -e "$repo/index/$file"
+        then
+            rm "$repo/index/$file"
+        fi
+        cp "$file" "$repo/index/"
+    fi    
+done

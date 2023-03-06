@@ -1,0 +1,214 @@
+#!/bin/dash
+
+# error check
+repo=.tigger
+if test ! -d "$repo"
+then 
+    echo "$0: error: tigger repository directory $repo not found" >&2
+    exit 1
+fi 
+
+if test $# -eq 0 -o $# -gt 3 
+then
+	echo "Usage:$1 <branch|commit> -m message" 
+	exit 1
+elif test $# -eq 1 -o $# -eq 2
+then
+    echo "$0: error: empty commit message" >&2
+    exit 1
+else 
+    target_branch=$1
+    message=$3
+fi
+
+check_branch=$(cat $repo/.branch_list | grep -E ^"$target_branch"$)
+if test "$check_branch" = ""
+then 
+    echo "$0: error: unknown branch '$target_branch'" >&2
+    exit 1
+fi
+
+
+current_branch=$(cat "$repo"/.current_branch)
+current_commit=$(cat $repo/branch/"$current_branch"/.log | cut -d' ' -f1 | tail -1)
+target_commit=$(cat $repo/branch/"$target_branch"/.log | cut -d' ' -f1 | tail -1)
+
+## check if fast forward merge
+check_fast_forward=false
+check_linear_commit=$(cat $repo/branch/"$target_branch"/.log | cut -d' ' -f1 | grep -E ^"$current_commit"$)
+if test ! "$check_linear_commit" = "" 
+then
+    if test "$target_commit" -gt "$current_commit"
+    then
+        check_fast_forward=true
+    fi
+fi
+
+# do fast forward merge
+if test "$check_fast_forward" = "true"
+then
+    # chage the branch files 
+    for commit in "$repo"/branch/"$target_branch"/*
+    do
+        commit_num=$(echo "$commit"| cut -d'/' -f4)
+        if test ! -d "$repo"/branch/"$current_branch"/"$commit_num"
+        then
+            cp -r "$commit" "$repo"/branch/"$current_branch"/
+        fi
+    done  
+    rm "$repo"/branch/"$current_branch"/.log
+    cp "$repo"/branch/"$target_branch"/.log $repo/branch/"$current_branch"/
+    # change the index files
+    rm -r "$repo"/index/*
+    cp -ri "$repo"/branch/"$target_branch"/"$target_commit"/* $repo/index/
+    # change the workdirectory files
+    for file in "$repo"/index/*
+    do  
+        file_name=$(echo "$file"| cut -d'/' -f3)
+        if test ! "$file_name" = "*"
+        then
+            if test -e "$file_name"
+            then
+                rm "$file_name"
+                cp "$file" ./
+            else
+                cp "$file" ./
+            fi
+        fi
+    done
+    echo "Fast-forward: no commit created"
+    exit 0
+fi
+
+# do three way merge
+if test "$check_fast_forward" = "false"
+then
+    #######################################
+    # Step 1
+    # get the largest common commit
+    # example :  
+    #          master : 0 1 3 4
+    #          new    : 0 1 2
+    # then we get 1 
+    #######################################
+    largest_common_commit=0
+    while test -e "$repo"/branch/"$target_branch"/"$largest_common_commit" -a -e "$repo"/branch/"$current_branch"/"$largest_common_commit"
+    do
+        largest_common_commit=$((largest_common_commit+1))
+    done
+    largest_common_commit=$((largest_common_commit-1))
+    ####################################################
+    # Step 2
+    # check if can merge
+    # a file can't be modified in two branches after the common commits
+    ####################################################
+    conflict_files=""
+    current_path="$repo/branch/$current_branch/$current_commit"
+    target_path="$repo/branch/$target_branch/$target_commit"
+    largest_common_path="$repo/branch/$target_branch/$largest_common_commit"
+    for file in "$largest_common_path"/*
+    do
+        file_name=$(echo "$file"| cut -d'/' -f5)
+        if test -e "$current_path"/"$file_name" -a "$target_path"/"$file_name"
+        then
+            if diff "$file" "$current_path"/"$file_name" >/dev/null
+            then 
+                continue
+            else
+                if diff "$file" "$target_path"/"$file_name" >/dev/null
+                then
+                    continue
+                else 
+                    conflict_files="$conflict_files\n$file_name"
+                fi
+            fi
+        fi
+    done
+    if test ! "$conflict_files" = ""
+    then
+        echo "$0: error: These files can not be merged:$conflict_files"
+        exit 1
+    fi
+    #############################
+    # step 3 
+    # do merge
+    #############################
+    rm -r "$repo"/index/*
+    # check which file updated from the largest common commit then cp it to index
+    for file in "$current_path"/*
+    do
+        file_name=$(echo "$file"| cut -d'/' -f5)
+        if test -e "$largest_common_path"/"$file_name"
+        then
+            if diff "$largest_common_path"/"$file_name" "$file" >/dev/null
+            then
+                if diff "$target_path"/"$file_name" "$file" >/dev/null
+                then
+                    cp "$file" "$repo"/index/
+                else
+                    cp "$target_path"/"$file_name" "$repo"/index/
+                fi
+            else
+                cp "$file" "$repo"/index/
+            fi
+        else
+            cp "$file" "$repo"/index/
+        fi
+    done
+
+    for file in "$target_path"/*
+    do
+        file_name=$(echo "$file"| cut -d'/' -f5)
+        if test -e "$repo"/index/"$file_name"
+        then
+            continue
+        else
+            cp "$file" "$repo"/index/
+        fi
+    done
+    # update work directory
+    for file in "$repo"/index/*
+    do  
+        file_name=$(echo "$file"| cut -d'/' -f3)
+        if test ! "$file_name" = "*"
+        then
+            if test -e "$file_name"
+            then
+                rm "$file_name"
+                cp "$file" ./
+            else
+                cp "$file" ./
+            fi
+        fi
+    done
+    # merge the commit history and log
+    for commit in "$repo"/branch/"$target_branch"/*
+    do
+        commit_num=$(echo "$commit"| cut -d'/' -f4)
+        if test ! -e $repo/branch/"$current_branch"/"$commit_num"
+        then
+            cp -r "$repo"/branch/"$target_branch"/"$commit_num" "$repo"/branch/"$current_branch"/ 
+        fi
+    done
+
+    while read -r line
+    do
+        check_if_exist=$(cat .tigger/branch/"$current_branch"/.log| grep -E "$line")
+        if test "$check_if_exist" = ""
+        then
+            echo "$line" >> "$repo"/branch/"$current_branch"/.log
+        fi
+    done <  "$repo"/branch/"$target_branch"/.log
+
+
+    # make commit
+    # for local
+    #./tigger-commit -m "$message" 2> /dev/null
+    # for autotest
+    tigger-commit -m "$message" 
+fi
+
+
+
+
+

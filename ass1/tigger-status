@@ -1,0 +1,116 @@
+#!/bin/dash
+if test ! $# -eq 0
+then 
+    echo "Usage: $0"
+    exit 1
+fi
+
+repo=.tigger
+if test ! -d "$repo"
+then 
+    echo "$0: error: tigger repository directory $repo not found" >&2
+    exit 1
+fi 
+
+current_branch=$(cat "$repo"/.current_branch)
+last_commit_dir=$(cat $repo/branch/"$current_branch"/.log | cut -d' ' -f1 | tail -1)
+
+rm "$repo"/.status 2>/dev/null
+touch "$repo"/.status 
+
+
+# check if file already written in .status
+if_need_check(){
+    file=$1
+    check=$(cat $repo/.status | cut -d' ' -f1 | grep -E ^"$file" -)
+    if test "$check" = "$file"
+    then
+        return 1
+    else
+        return 0
+    fi
+}
+
+
+
+
+for file in *
+do 
+    # file in workdir not index (in or not in repo)
+    if test ! -e "$repo"/index/"$file"
+    then
+        if test "$file" != '*'
+        then
+            echo "$file - untracked" >> "$repo"/.status
+        fi
+    else
+        # file in workdir and index not in repo
+        if test ! -e "$repo"/branch/"$current_branch"/"$last_commit_dir"/"$file"
+        then
+            if diff "$file" "$repo"/index/"$file" >/dev/null
+            then
+                # work same as index 
+                echo "$file - added to index" >> "$repo"/.status
+            else
+                # work not same as index
+                echo "$file - added to index, file changed" >> "$repo"/.status
+            fi
+        # file in workdir and index and in repo
+        else
+            if diff "$file" "$repo"/index/"$file" >/dev/null
+            then
+                if diff "$repo"/index/"$file" "$repo"/branch/"$current_branch"/"$last_commit_dir"/"$file" >/dev/null
+                then
+                    #echo "work = index = repo"
+                    echo "$file - same as repo" >> "$repo"/.status
+                else
+                    #echo "work = index != repo"
+                    echo "$file - file changed, changes staged for commit" >> "$repo"/.status
+                fi
+            else
+                if diff "$repo"/index/"$file" "$repo"/branch/"$current_branch"/"$last_commit_dir"/"$file" >/dev/null
+                then
+                    #echo "work != index = repo"
+                    echo "$file - file changed, changes not staged for commit" >> "$repo"/.status
+                else
+                    #echo "work != index != repo"
+                    echo "$file - file changed, different changes staged for commit" >> "$repo"/.status
+                fi
+            fi
+        fi
+    fi
+done
+
+for file in "$repo"/index/*
+do
+    if test -e "$file"
+    then
+        file_name=$(echo "$file"| cut -d'/' -f3)
+        if  if_need_check "$file_name"
+        then
+            if test -e "$repo"/branch/"$current_branch"/"$last_commit_dir"/"$file_name"
+            then    
+            # file not in work but in index and repo
+                echo "$file_name - file deleted" >> "$repo"/.status
+            else
+            # file not in work and repo but in index
+                echo "$file_name - added to index, file deleted" >> "$repo"/.status
+            fi
+        fi
+    fi
+done
+
+for file in "$repo"/branch/"$current_branch"/"$last_commit_dir"/*
+do
+    if test -e "$file"
+    then
+        file_name=$(echo "$file"|cut -d'/' -f5)
+        if if_need_check "$file_name"
+        then
+            echo "$file_name - deleted" >> "$repo"/.status
+        fi
+    fi
+done
+
+
+cat $repo/.status |sort

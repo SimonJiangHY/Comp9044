@@ -1,0 +1,31 @@
+#!/bin/dash
+
+# check argument number
+if test ! $# -eq 0
+then 
+    echo "Usage: $0"
+    exit 1
+fi
+
+# check if repo exists
+repo=.tigger
+if test -e "$repo"
+then
+    echo "$0: error: $repo already exists" >&2
+    exit 1
+else
+    echo "Initialized empty tigger repository in $repo"
+    # create a directory named .tigger
+    # TODO: design the structre of .tigger
+    mkdir "$repo"
+    mkdir "$repo/index"
+    mkdir "$repo/branch"
+    mkdir "$repo/branch/master"
+    touch "$repo/branch/master/.log"
+    touch "$repo/.complete_log"
+    touch "$repo/.current_branch"
+    touch "$repo/.branch_list"
+    echo "master" > "$repo/.current_branch"
+    echo "master" > "$repo/.branch_list"
+fi
+

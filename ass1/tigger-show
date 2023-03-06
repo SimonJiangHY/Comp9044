@@ -1,0 +1,60 @@
+#!/bin/dash
+
+if test ! $# -eq 1
+then 
+    echo "Usage: $0 <commit>:<filename>"
+    exit 1
+fi
+repo=.tigger
+if test ! -d "$repo"
+then 
+    echo "$0: error: tigger repository directory $repo not found" >&2
+    exit 1
+fi 
+
+# TODO: change the branch (subset 2)
+# current_branch=$(cat "$repo"/.current_branch)
+
+check_valid_args=$(echo "$1"| grep -E '^[0-9:]')
+if test "$check_valid_args" = ""
+then
+    echo "$0: error: wrong argument"
+    exit 1
+fi
+
+file_name=$(echo "$1" | cut -d':' -f2)
+commit_num=$(echo "$1" | cut -d':' -f1)
+if test "$commit_num" = ""
+then
+    commit_num=-1
+fi
+
+if test ! "$commit_num" -eq -1 
+then
+    for path in "$repo"/branch/*
+    do
+        if test -e "$path"/"$commit_num"
+        then            
+            if test -e "$path"/"$commit_num"/"$file_name"
+            then
+                cat "$path"/"$commit_num"/"$file_name"
+                exit 0
+            else
+                echo "$0: error: '$file_name' not found in commit $commit_num" >&2
+                exit 1
+            fi 
+        fi         
+    done
+    echo "$0: error: unknown commit '$commit_num'" >&2
+    exit 1
+else
+    if test -e "$repo"/index/"$file_name"
+    then
+        cat "$repo"/index/"$file_name"
+        exit 0
+    else
+        echo "$0: error: '$file_name' not found in index" >&2
+        exit 1
+    fi  
+fi
+    

@@ -1,0 +1,109 @@
+#!/bin/dash
+
+if test $# -eq 0
+then 
+    echo "Usage: $0 <-a> <-m> <message>"
+    exit 1
+fi
+repo=.tigger
+if test ! -d "$repo"
+then 
+    echo "$0: error: tigger repository directory $repo not found" >&2
+    exit 1
+fi 
+
+# subset 1 extension module
+if test "$1" = "-a"
+then
+    message=$3
+    # check the file in .tigger/index file
+    for path in "$repo"/index/*
+    do
+        file=$(echo "$path"|cut -d'/' -f3)
+        if test -e "$file"
+        then
+            # for local
+            # ./tigger-add "$file" 2> /dev/null
+            # for autotest
+            tigger-add "$file"  2> /dev/null
+        fi
+    done
+else
+    message=$2
+fi
+
+# subset 0 commit
+# current_branch=$() 
+
+# first step : get the commit number
+last_num=$(cat $repo/.complete_log | cut -d'-' -f2 | tail -1)
+if test "$last_num" -ge 0 2> /dev/null
+then
+    commit_num=$((last_num+1))
+else
+    commit_num=0
+fi
+
+# TODO: change the branch (subset 2)
+current_branch=$(cat "$repo"/.current_branch)
+
+ 
+last_commit_dir=$(cat $repo/branch/"$current_branch"/.log | cut -d' ' -f1 | tail -1)
+# no commit before
+if test "$last_commit_dir" = ""
+then 
+    cp -r "$repo"/index "$repo"/branch/"$current_branch"
+    mv "$repo"/branch/"$current_branch"/index "$repo"/branch/"$current_branch"/"$commit_num"
+    echo "Committed as commit $commit_num"
+    #echo "$commit_num $message"
+    echo "$current_branch-$commit_num-$message" >> "$repo"/.complete_log
+    echo "$commit_num $message" >> "$repo"/branch/"$current_branch"/.log
+    exit 0
+# already have commits
+else
+    # check if you need to commit
+    last_commit_files=$(ls "$repo"/branch/"$current_branch"/"$last_commit_dir")
+    index_files=$(ls "$repo"/index)
+
+    if_need_commit=f
+    if test "$last_commit_files" = "$index_files"
+    then
+        for file in "$repo"/branch/"$current_branch"/"$last_commit_dir"/*
+        do   
+            file_name=$(echo "$file" | cut -d'/' -f5)
+            if test "$file_name" != "*"
+            then
+                if ! diff "$file" "$repo"/index/"$file_name" >/dev/null
+                then
+                    #echo "$file - $repo"/index/"$file_name are different"
+                    if_need_commit=t
+                    break
+                fi
+            fi
+        done
+    else
+        if_need_commit=t
+    fi
+
+    if test $if_need_commit = t
+    then
+        cp -r "$repo"/index "$repo"/branch/"$current_branch"
+        mv "$repo"/branch/"$current_branch"/index "$repo"/branch/"$current_branch"/"$commit_num"
+        echo "Committed as commit $commit_num"
+        #echo "$commit_num $message"
+        echo "$current_branch-$commit_num-$message" >> "$repo"/.complete_log
+        echo "$commit_num $message" >> "$repo"/branch/"$current_branch"/.log
+        exit 0
+    else
+        echo "nothing to commit"
+        exit 0
+    fi
+fi
+
+
+
+
+
+
+
+

@@ -1,0 +1,81 @@
+#!/bin/dash
+
+repo=.tigger
+if test ! -d "$repo"
+then 
+    echo "$0: error: tigger repository directory $repo not found" >&2
+    exit 1
+fi 
+
+current_branch=$(cat "$repo"/.current_branch)
+commit_msg=$(cat "$repo"/.complete_log)
+if test "$commit_msg" = ""
+then
+    echo "$0: error: this command can not be run until after the first commit" >&2
+    exit 1
+fi
+
+# lists branch names
+if test "$#" -eq 0
+then
+    cat $repo/.branch_list | sort
+    exit 0
+fi
+
+# create a new branch
+if test "$#" -eq 1
+then
+    new_branch="$1"
+    check_valid_branch=$(cat $repo/.branch_list | grep -E ^"$1"$)
+    if test "$check_valid_branch" = ""
+    then
+        mkdir $repo/branch/"$new_branch"
+        cp $repo/branch/"$current_branch"/.log $repo/branch/"$new_branch"/
+        cp -ri $repo/branch/"$current_branch"/* $repo/branch/"$new_branch"/
+        echo "$1" >> $repo/.branch_list
+    else
+        echo "$0: error: branch '$new_branch' already exists" >&2
+        exit 1
+    fi
+fi
+
+
+# delete a branch
+if test "$#" -eq 2 -a "$1" = "-d"
+then
+    target_branch=$2
+    if test "$target_branch" = "master"
+    then
+        echo "$0: error: can not delete branch 'master'" >&2
+        exit 1 
+    fi
+
+    if test ! -d $repo/branch/"$target_branch"
+    then
+        echo "$0: error: branch '$target_branch' doesn't exist" >&2
+        exit 1
+    else
+        # check if unmerge
+        check_unmerge=false
+        while read -r line
+        do
+            check_if_commit_exist=$(cat $repo/branch/"$current_branch"/.log | grep -E "$line")
+            if test "$check_if_commit_exist" = ""
+            then
+                check_unmerge=true
+                break
+            fi
+        done < "$repo"/branch/"$target_branch"/.log
+
+        if test "$check_unmerge" = "true"
+        then
+            echo "$0: error: branch '$target_branch' has unmerged changes" >&2
+            exit 1
+        else
+            rm -rf $repo/branch/"$target_branch"
+            sed -E -i /^"$target_branch"$/d $repo/.branch_list
+            echo "Deleted branch '$target_branch'"
+            exit 0
+        fi
+    fi
+fi
